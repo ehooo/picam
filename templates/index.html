@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<head>
+  <meta charset="utf-8">
+  <title>Overlay</title>
+  <link rel="stylesheet" href="/video.css">
+  <script src="/video.js"></script>
+  <style>
+    .overlay {
+      width: ${width}px;
+      height: ${height}px;
+    }
+  </style>
+</head>
+<body>
+  <div id="content">
+    <div class="overlay">
+      <div class="overlay-helper">
+        <div class="overlay-element top-left">
+          <span id="overlay-top-left-text" class="overlay-text">
+            <span id="stop" style="display: none">&#x1F534; REC</span>
+            <span id="record">&#x1F3A5;</span>
+          </span>
+        </div>
+        <div class="overlay-element top-right">
+          <span id="overlay-top-right-text" class="overlay-text">
+            <span id="photo">&#x1F4F7;</span>
+          </span>
+        </div>
+        <div class="overlay-element bottom-left">
+          <span id="overlay-bottom-left-text" class="overlay-text">
+
+            <select name="fps">
+              <option value="5" ${fps_5}>5 FPS</option>
+              <option value="10" ${fps_10}>10 FPS</option>
+              <option value="15" ${fps_15}>15 FPS</option>
+              <option value="20" ${fps_20}>20 FPS</option>
+              <option value="25" ${fps_25}>25 FPS</option>
+              <option value="30" ${fps_30}>30 FPS</option>
+            </select>
+
+            <select name="resolution">
+              <option value="hd" ${hd}>1280x720</option>
+              <option value="svga" ${svga}>800x600</option>
+              <option value="vga" ${vga}>640x480</option>
+            </select>
+          </span>
+        </div>
+        <div class="overlay-element bottom-right">
+          <span id="overlay-bottom-right-text" class="overlay-text">
+          </span>
+        </div>
+      </div>
+    </div>
+    <img id="video" class="base" data-src="${video_feed}" width="${width}" height="${height}">
+  </div>
+</body>
+</html>
