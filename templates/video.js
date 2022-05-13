@@ -1,15 +1,42 @@
 const ACTION_START = 'start';
 const ACTION_STOP = 'stop';
 const ACTION_ROTATE = 'rotate';
+const MIN_RESOLUTION_CHANGE = 10;
+const ROTATE_MAP = {
+    0: '&#x1F446',
+    90: '&#x1F448',
+    180: '&#x1F447',
+    270: '&#x1F449',
+}
 
+var previous_resolution = 0;
+var previous_fps = 0;
 
 function update_setting_picam(callback=undefined, action=undefined){
-  let data = {
-    'fps': document.querySelector('[name="fps"]').value,
-    'resolution': document.querySelector('[name="resolution"]').value,
+  var refresh = false;
+  let fps = document.querySelector('[name="fps"]').value;
+  let data = {}
+  if (previous_fps!=fps){
+    data.fps = fps;
+    previous_fps = fps;
+    refresh = true;
   }
+  let resolution = Math.min(window.innerHeight, window.innerWidth);
+  if (Math.abs(resolution - previous_resolution) > MIN_RESOLUTION_CHANGE) {
+    data.resolution = resolution;
+    previous_resolution = resolution;
+    let video_frame = document.querySelector('#video_frame');
+    video_frame.style.width = resolution+'px';
+    video_frame.style.height = resolution+'px';
+    refresh = true;
+  }
+
   if (action !== undefined){
     data.mode = action
+  }
+
+  if(Object.keys(data).length === 0){
+    return;
   }
 
   let url = '/control?';
@@ -22,6 +49,7 @@ function update_setting_picam(callback=undefined, action=undefined){
         let response = JSON.parse(this.responseText);
         callback(response);
       }
+      if(refresh) refresh_video();
     }
   };
   xhttp.send();
@@ -39,27 +67,33 @@ function recording_mode(recording=false) {
   }
 }
 
+function refresh_video(){
+  const video = document.querySelector("#video");
+  let src = video.attributes.getNamedItem('data-src').value;
+  video.src = src + "?" + new Date().getTime();
+}
 
 document.addEventListener("DOMContentLoaded", function(event) {
   const video = document.querySelector("#video");
+  const rotate_pointer = document.querySelector("#rotate_pointer");
+  window.onresize = update_setting_picam;
+
   update_setting_picam((response) => {
     recording_mode(response.cam);
     if(response.cam){
-      let src = video.attributes.getNamedItem('data-src').value;
-      video.src = src + "?" + new Date().getTime();
+      refresh_video();
     }
+    rotate_pointer.innerHTML = ROTATE_MAP[response.rotation];
+  });
+  rotate_pointer.addEventListener("click", (event) => {
+    update_setting_picam((response) => {
+      rotate_pointer.innerHTML = ROTATE_MAP[response.rotation];
+    }, ACTION_ROTATE);
   });
 
   const fps_selector = document.querySelector('[name="fps"]');
   fps_selector.addEventListener("change", (event) => {
     update_setting_picam();
-  });
-
-  const resolution_selector = document.querySelector('[name="resolution"]');
-  resolution_selector.addEventListener("change", (event) => {
-    update_setting_picam((response) => {
-      location.reload();
-    });
   });
 
   const stop_button = document.querySelector('#stop');
@@ -72,8 +106,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
   record_button.addEventListener("click", (event) => {
     update_setting_picam((response) => {
       recording_mode(response.cam);
-      let src = video.attributes.getNamedItem('data-src').value;
-      video.src = src + "?" + new Date().getTime();
+      refresh_video();
     }, ACTION_START);
   });
   const photo_button = document.querySelector('#photo');

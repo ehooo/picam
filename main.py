@@ -10,7 +10,7 @@ import logging
 import socketserver
 from pathlib import Path
 from string import Template
-from threading import Condition
+from threading import Condition, Lock
 from http import server
 from time import sleep
 from urllib.parse import urlparse, parse_qs
@@ -22,6 +22,7 @@ try:
 except (ImportError, OSError):
     picamera = type('', (), {})
     picamera.PiCameraNotRecording = KeyError
+    picamera.PiCameraMMALError = Exception
 
 BASE_PATH = os.path.dirname(Path(__file__).absolute())
 FRAMERATE = 5
@@ -30,20 +31,14 @@ FRAMERATE = 5
 class PiCam(object):
     FRAMERATES = [5, 10, 15, 20, 25, 30]
     ROTATION_OPTIONS = [0, 90, 180, 270]
-    RESOLUTION = {
-        "hd": (1280, 720),
-        "svga": (800, 600),
-        "vga": (640, 480),
-    }
     UNLOCK_SEC = 1
 
-    def __init__(self, framerate=FRAMERATE, resolution='hd'):
+    def __init__(self, framerate=FRAMERATE, resolution=720):
         self.frame = None
         self.buffer = io.BytesIO()
         self.condition = Condition()
         self.camera = None
         self._framerate = framerate
-        self.width, self.height = 1280, 720
         self.resolution = resolution
         self.format = 'mjpeg'
         self.rotation_pos = 0
@@ -61,15 +56,21 @@ class PiCam(object):
                 self.camera.framerate = framerate
     framerate = property(_get_framerate, _set_framerate)
 
+    @property
+    def width(self):
+        return self._resolution
+
+    @property
+    def height(self):
+        return self._resolution
+
     def _get_resolution(self):
         return self._resolution
 
     def _set_resolution(self, resolution):
-        if resolution in self.RESOLUTION:
-            self._resolution = resolution
-            self.width, self.height = self.RESOLUTION[resolution]
-            if self.camera:
-                self.camera.resolution = self.width, self.height
+        self._resolution = resolution
+        if self.camera:
+            self.camera.resolution = self.width, self.height
     resolution = property(_get_resolution, _set_resolution)
 
     def blank_frame(self):
@@ -93,12 +94,15 @@ class PiCam(object):
 
     def _setup_camera(self):
         if self.camera is None and hasattr(picamera, 'PiCamera'):
-            self.camera = picamera.PiCamera(
-                resolution='{}x{}'.format(self.width, self.height),
-                framerate=self._framerate,
-            )
-            # self.camera.exposure_mode = 'night'
-            self.camera.rotation = self.rotation
+            try:
+                self.camera = picamera.PiCamera(
+                    resolution='{}x{}'.format(self.width, self.height),
+                    framerate=self._framerate,
+                )
+                # self.camera.exposure_mode = 'night'
+                self.camera.rotation = self.rotation
+            except picamera.PiCameraMMALError:
+                pass
         return self.camera
 
     def photo(self):
@@ -160,6 +164,8 @@ class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
 class StreamingHandler(server.BaseHTTPRequestHandler):
     STREAM_PATH = '/stream.mjpg'
     CONTROL_PATH = '/control'
+    MIN_RESOLUTION_CHANGE = 10
+    CHANGE_CAM_LOCK = Lock()
 
     def get_path(self):
         return os.path.abspath('/../{}'.format(self.path))
@@ -168,11 +174,6 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
     def get_context(self, path):
         return {
             'video_feed': self.STREAM_PATH,
-            'width': CAM.width,
-            'height': CAM.height,
-            'hd': 'selected' if CAM.resolution == 'hd' else '',
-            'svga': 'selected' if CAM.resolution == 'svga' else '',
-            'vga': 'selected' if CAM.resolution == 'vga' else '',
             'fps_5': 'selected' if CAM.framerate == 5 else '',
             'fps_10': 'selected' if CAM.framerate == 10 else '',
             'fps_15': 'selected' if CAM.framerate == 15 else '',
@@ -268,37 +269,44 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             else:
                 self.stream()
         elif path == self.CONTROL_PATH:
-            query = parse_qs(url_result.query)
-            start = False
-            was_started = CAM.camera is not None
-            try:
-                fps = int(query.get('fps', [CAM.framerate])[0])
-                if CAM.framerate != fps:
-                    CAM.stop()
-                    CAM.framerate = fps
-                    start = was_started
-            except (TypeError, ValueError):
-                pass
-
-            resolution = query.get('resolution', [CAM.resolution])[0]
-            if CAM.resolution != resolution:
-                CAM.stop()
-                CAM.resolution = resolution
-                start = was_started
-
-            if 'mode' in query:
-                mode = query.get('mode')[0]
-                if mode == 'rotate':
-                    CAM.rotate()
-                elif mode == 'photo':
-                    if not was_started:
+            if self.CHANGE_CAM_LOCK.acquire(timeout=0.01):
+                try:
+                    query = parse_qs(url_result.query)
+                    start = False
+                    was_started = CAM.camera is not None
+                    try:
+                        fps = int(query.get('fps', [CAM.framerate])[0])
+                        if CAM.framerate != fps:
+                            CAM.stop()
+                            CAM.framerate = fps
+                            start = was_started
+                    except (TypeError, ValueError):
                         pass
-                elif mode == 'stop':
-                    CAM.stop()
-                elif mode == 'start':
-                    start = True
-            if start:
-                CAM.start()
+
+                    try:
+                        resolution = int(query.get('resolution', [CAM.resolution])[0])
+                        if abs(CAM.resolution - resolution) > self.MIN_RESOLUTION_CHANGE:
+                            CAM.stop()
+                            CAM.resolution = resolution
+                            start = was_started
+                    except (TypeError, ValueError):
+                        pass
+
+                    if 'mode' in query:
+                        mode = query.get('mode')[0]
+                        if mode == 'rotate':
+                            CAM.rotate()
+                        elif mode == 'photo':
+                            if not was_started:
+                                pass
+                        elif mode == 'stop':
+                            CAM.stop()
+                        elif mode == 'start':
+                            start = True
+                    if start:
+                        CAM.start()
+                finally:
+                    self.CHANGE_CAM_LOCK.release()
 
             self.status()
         else:
