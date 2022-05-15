@@ -12,7 +12,7 @@ The web interface allow:
 * Download photo.
 * Allows turn on light.
 
-# Setup
+# Install
 ```
 sudo pip3 install -r requirements.txt
 ```
