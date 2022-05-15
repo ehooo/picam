@@ -1,13 +1,15 @@
 # Web streaming based on
 # http://picamera.readthedocs.io/en/latest/recipes2.html#web-streaming
-
+import argparse
 import io
 import json
 import mimetypes
 import os.path
-
 import logging
 import socketserver
+import configparser
+import sys
+
 from pathlib import Path
 from string import Template
 from threading import Condition, Lock
@@ -16,6 +18,13 @@ from time import sleep
 from urllib.parse import urlparse, parse_qs
 
 from PIL import Image
+
+try:
+    from gpiozero.pins.pigpio import PiGPIOFactory
+    from gpiozero import LED
+except (ImportError, OSError):
+    PiGPIOFactory = None
+    LED = None
 
 try:
     import picamera
@@ -31,7 +40,6 @@ FRAMERATE = 5
 class PiCam(object):
     FRAMERATES = [5, 10, 15, 20, 25, 30]
     ROTATION_OPTIONS = [0, 90, 180, 270]
-    UNLOCK_SEC = 1
 
     def __init__(self, framerate=FRAMERATE, resolution=720):
         self.frame = None
@@ -45,6 +53,9 @@ class PiCam(object):
         self.scroll = ['-', '\\', '|', '/']
         self.scroll_pos = 0
         self.stdout = None
+        self._pin_factory = None
+        self._light = None
+        self._light_on = False
 
     def _get_framerate(self):
         return self._framerate
@@ -54,6 +65,7 @@ class PiCam(object):
             self._framerate = framerate
             if self.camera:
                 self.camera.framerate = framerate
+
     framerate = property(_get_framerate, _set_framerate)
 
     @property
@@ -71,6 +83,7 @@ class PiCam(object):
         self._resolution = resolution
         if self.camera:
             self.camera.resolution = self.width, self.height
+
     resolution = property(_get_resolution, _set_resolution)
 
     def blank_frame(self):
@@ -155,6 +168,38 @@ class PiCam(object):
     def __del__(self):
         self.stop()
 
+    def setup_light(self, config):
+        try:
+            if PiGPIOFactory is None or LED is None:
+                raise IOError()
+            host = config.get('light', 'host')
+            port = config.getint('light', 'port')
+            pin = config.getint('light', 'pin')
+            active_high = config.getboolean('light', 'active_high')
+            self._pin_factory = self._pin_factory or PiGPIOFactory(host, port)
+            self._light = self._light or LED(
+                pin=pin, active_high=active_high, initial_value=False,
+                pin_factory=self._pin_factory
+            )
+        except (
+                configparser.NoSectionError,
+                configparser.NoOptionError,
+                IOError,
+        ):
+            pass
+
+    @property
+    def light_on(self):
+        return self._light_on
+
+    def light_toggle(self):
+        if self._light:
+            if self._light_on:
+                self._light.off()
+            else:
+                self._light.on()
+            self._light_on = not self._light_on
+
 
 class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
     allow_reuse_address = True
@@ -233,11 +278,24 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             'rotation': CAM.rotation,
             'resolution': CAM.resolution,
             'fps': CAM.framerate,
+            'light': CAM.light_on,
         }).encode()
         self.send_header('Content-Length', str(len(content)))
         self.end_headers()
         self.wfile.write(content)
         self.wfile.flush()
+
+    def log_error(self, format, *args):
+        sys.stderr.write("%s - - [%s] %s\n" %
+                         (self.address_string(),
+                          self.log_date_time_string(),
+                          format % args))
+
+    def log_message(self, format, *args):
+        sys.stdout.write("%s - - [%s] %s\n" %
+                         (self.address_string(),
+                          self.log_date_time_string(),
+                          format % args))
 
     # noinspection PyPep8Naming
     def do_GET(self):
@@ -303,6 +361,8 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                             CAM.stop()
                         elif mode == 'start':
                             start = True
+                        elif mode == 'light':
+                            CAM.light_toggle()
                     if start:
                         CAM.start()
                 finally:
@@ -315,10 +375,54 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         self.connection.close()
 
 
+def check_config_file(config_file):
+    try:
+        config = configparser.ConfigParser()
+        config.read(config_file)
+        if not all([
+            config.has_section('server'),
+            config.has_option('server', 'port'),
+            config.has_option('server', 'address'),
+        ]):
+            return
+        if config.has_section('light') and not all([
+            config.has_option('light', 'port'),
+            config.has_option('light', 'host'),
+            config.has_option('light', 'pin'),
+            config.has_option('light', 'active_high'),
+        ]):
+            return
+        return config
+    except configparser.ParsingError:
+        pass
+
+
+def main():
+    config_file = os.path.join(BASE_PATH, 'picam.conf')
+    parser = argparse.ArgumentParser(description='PiCam Streaming service')
+    parser.add_argument('--config', dest='config_file', default=config_file, required=False,
+                        help='Path to custom config file, default: {}'.format(config_file))
+    options = parser.parse_args()
+    if not os.path.isfile(options.config_file):
+        parser.exit(-1, 'Config file not exists\n')
+    config = check_config_file(options.config_file)
+    if not config:
+        parser.exit(-2, 'Invalid config file\n')
+
+    config = configparser.ConfigParser()
+    config.read(config_file)
+    CAM.setup_light(config)
+
+    addr = config.get('server', 'address')
+    port = config.getint('server', 'port')
+
+    address = (addr, port)
+    stream_server = StreamingServer(address, StreamingHandler)
+    stream_server.serve_forever()
+
+
 CAM = PiCam()
 
 
 if __name__ == '__main__':
-    address = ('', 8000)
-    server = StreamingServer(address, StreamingHandler)
-    server.serve_forever()
+    main()

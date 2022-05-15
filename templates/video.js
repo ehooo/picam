@@ -1,13 +1,18 @@
 const ACTION_START = 'start';
 const ACTION_STOP = 'stop';
 const ACTION_ROTATE = 'rotate';
+const ACTION_LIGHT = 'light';
 const MIN_RESOLUTION_CHANGE = 10;
 const ROTATE_MAP = {
     0: '&#x1F446',
     90: '&#x1F448',
     180: '&#x1F447',
     270: '&#x1F449',
-}
+};
+const LIGHT = {
+  false: '&#x1F31C',
+  true: '&#x1F31E',
+};
 
 var previous_resolution = 0;
 var previous_fps = 0;
@@ -16,7 +21,7 @@ function update_setting_picam(callback=undefined, action=undefined){
   var refresh = false;
   let fps = document.querySelector('[name="fps"]').value;
   let data = {}
-  if (previous_fps!=fps){
+  if (previous_fps!==fps){
     data.fps = fps;
     previous_fps = fps;
     refresh = true;
@@ -75,6 +80,7 @@ function refresh_video(){
 
 document.addEventListener("DOMContentLoaded", function(event) {
   const video = document.querySelector("#video");
+  const light = document.querySelector("#light");
   const rotate_pointer = document.querySelector("#rotate_pointer");
   window.onresize = update_setting_picam;
 
@@ -84,11 +90,17 @@ document.addEventListener("DOMContentLoaded", function(event) {
       refresh_video();
     }
     rotate_pointer.innerHTML = ROTATE_MAP[response.rotation];
+    light.innerHTML = LIGHT[response.light];
   });
   rotate_pointer.addEventListener("click", (event) => {
     update_setting_picam((response) => {
       rotate_pointer.innerHTML = ROTATE_MAP[response.rotation];
     }, ACTION_ROTATE);
+  });
+  light.addEventListener("click", (event) => {
+    update_setting_picam((response) => {
+      light.innerHTML = LIGHT[response.light];
+    }, ACTION_LIGHT);
   });
 
   const fps_selector = document.querySelector('[name="fps"]');

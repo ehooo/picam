@@ -80,6 +80,6 @@
   right: var(--border-space);
 }
 
-#record, #photo, #rotate_pointer {
+#record, #photo, #rotate_pointer, #light {
   font-size: 2em;
 }
