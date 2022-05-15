@@ -1,0 +1,16 @@
+[Unit]
+Description=Picam web service
+After=network.target
+
+[Service]
+Type=idle
+WorkingDirectory=/home/pi/code/picam
+ExecStart=/usr/bin/python3 /home/pi/code/picam/main.py
+Restart=on-failure
+User=pi
+Group=pi
+StandardOutput=file:/home/pi/code/picam/picam.log
+StandardError=file:/home/pi/code/picam/picam.err.log
+
+[Install]
+WantedBy=multi-user.target
