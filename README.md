@@ -1,4 +1,4 @@
-# picam
+# PiCam
 
 Web streaming based on
 http://picamera.readthedocs.io/en/latest/recipes2.html#web-streaming
@@ -9,7 +9,12 @@ The web interface allow:
 * Change rotation.
 * Download photo.
 
-## Setup on systemd
+# Install
+```
+sudo pip3 install -r requirements.txt
+```
+
+## Setup systemd
 ```
 sudo cp /home/pi/code/picam/picam.service /lib/systemd/system/picam.service
 sudo chmod 644 /lib/systemd/system/picam.service
